@@ -1,10 +1,11 @@
 package groupme
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 )
@@ -68,7 +69,7 @@ func (c *Client) GetMessages(groupID string, limit string, beforeID, sinceID, af
 	if err != nil {
 		return GetMessagesResponse{}, err
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
 		return GetMessagesResponse{}, err
@@ -117,3 +118,65 @@ func (c *Client) AllMessages(groupID string) ([]*Message, error) {
 
 	return history, nil
 }
+
+// CreateMessageResponse is a the HTTP response from CreateMessages (`POST /groups/:group_id/messages`).
+type CreateMessageResponse struct {
+	Message *Message `json:"message"`
+}
+
+type CreateMessagePayload struct {
+	Message struct {
+		SourceGUID string `json:"source_guid"`
+		Text       string `json:"text"`
+		// TODO: FIXME: XXX: support attachments
+	} `json:"message"`
+}
+
+// CreateNessage creates a message for a group.
+func (c *Client) CreateMessage(groupID string, source_guid string, text string) (CreateMessageResponse, error) {
+	// build query params
+	values := url.Values{}
+	values.Add("token", c.AccessToken)
+	params := values.Encode()
+
+	// generate URL for request
+	URL, err := createURL(c.BaseURL, fmt.Sprintf("/groups/%s/messages", groupID), params)
+	if err != nil {
+		return CreateMessageResponse{}, err
+	}
+
+	msg := CreateMessagePayload{}
+	msg.Message.SourceGUID = source_guid
+	msg.Message.Text = text
+
+	buf, err := json.Marshal(msg)
+	if err != nil {
+		return CreateMessageResponse{}, err
+	}
+
+	// send request, read body
+	resp, err := http.Post(URL, "application/json", bytes.NewBuffer(buf))
+	if err != nil {
+		return CreateMessageResponse{}, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return CreateMessageResponse{}, err
+	}
+
+	// exit early on error
+	if resp.StatusCode == http.StatusNotModified {
+		return CreateMessageResponse{}, ErrNotModified
+	}
+
+	var message CreateMessageResponse
+	err = json.Unmarshal(body, &message)
+	if err != nil {
+		return CreateMessageResponse{}, err
+	}
+
+	return message, nil
+}
+
+//POST /groups/:group_id/messages
